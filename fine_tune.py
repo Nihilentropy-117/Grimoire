@@ -33,15 +33,20 @@ def make_dataset(_dataset, _type, _model, group_max_sentences=5):
     tokenizer = AutoTokenizer.from_pretrained(_model)
     tokenizer.pad_token = tokenizer.eos_token  # Set pad token
 
-    pickle_file = 'dataset.pickle'
-
-    if _type == "datasets":
+    dataset_pickle = 'dataset.pickle'
+    tokenized_dataset_pickle = "mapped_dataset.pickle"
+    
+    if os.path.exists(tokenized_dataset_pickle):
+        with open(tokenized_dataset_pickle, 'rb') as f:
+            print("Loading tokenized dataset from pickle file.")
+            dataset = pickle.load(f)
+    elif _type == "datasets":
         dataset = load_dataset(_dataset)
     elif _type == "raw":
-        if os.path.exists(pickle_file):
+        if os.path.exists(dataset_pickle):
             # Load the previously saved dataset from pickle file
-            with open(pickle_file, 'rb') as f:
-                print("Loading dataset from pickle file.")
+            with open(dataset_pickle, 'rb') as f:
+                print("Loading unmapped dataset from pickle file.")
                 dataset = pickle.load(f)
         else:
             # Process the dataset since no pickle file exists
@@ -65,22 +70,29 @@ def make_dataset(_dataset, _type, _model, group_max_sentences=5):
 
                 dataset = Dataset.from_dict({"text": overlapping_chunks})
 
-                # Save the processed dataset
-                with open(pickle_file, 'wb') as f:
+                # Save the processed dataset to a pickle file
+                with open(dataset_pickle, 'wb') as f:
                     print("Saving dataset to pickle file.")
                     pickle.dump(dataset, f)
     else:
         print("Invalid Dataset Type")
         return None
 
-    # Tokenize the dataset
-    tokenized_dataset = dataset.map(lambda x: tokenizer(x['text'], padding="max_length", truncation=True), batched=True)
+    def tokenize_batch(examples):
+        concatenated_texts = [' '.join(text) if isinstance(text, list) else text for text in examples['text']]
+        return tokenizer(concatenated_texts, padding="max_length", truncation=True,
+                         max_length=tokenizer.model_max_length)
+    tokenized_dataset = dataset.map(tokenize_batch, batched=True)
+
+    with open(tokenized_dataset_pickle, 'wb') as f:
+        print("Saving tokenized dataset to pickle file.")
+        pickle.dump(tokenized_dataset, f)
 
     total_entries = len(tokenized_dataset)
-    split_index = int(total_entries * 0.95)  # Calculate the 95%split
+    split_index = int(total_entries * 0.95)  # Calculate the 95% index for the split
 
-    train_dataset = tokenized_dataset[:split_index]  # 95% of the datase
-    eval_dataset = tokenized_dataset[split_index:]  # Remaining 5% 
+    train_dataset = tokenized_dataset[:split_index]  # 95% of the dataset for training
+    eval_dataset = tokenized_dataset[split_index:]  # Remaining 5% for evaluation
 
     return train_dataset, eval_dataset
 
